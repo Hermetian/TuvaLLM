@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data files (large)
+data/raw/*.mp3
+data/raw/*.wav
+data/processed/segments/
+*.wav
+
+# Models (large)
+models/*/pytorch_model.bin
+models/*/model.safetensors
+models/*/*.bin
+models/*/adapter_model.safetensors
+
+# Temp files
+*.tmp
+*.temp
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
