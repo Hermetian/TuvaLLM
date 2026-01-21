@@ -1,0 +1,13 @@
+{
+  "benchmark": "UDHR Article 1",
+  "results": [
+    {
+      "model": "MMS Baseline (Samoan)",
+      "transcription": "e fānau mai ia tino katoa i te saolotoga kae pao te lotou tulaga fakaaloalogina mo te lotou aiā ne tuku atu kia latou a te mafaofao mo te lotolagona te lalā e tauogalue fakatasi a latou e pei la mene taina",
+      "wer_system4": 0.5454545454545454,
+      "wer_system6": 0.4772727272727273,
+      "cer_system4": 0.16587677725118483,
+      "cer_system6": 0.12796208530805686
+    }
+  ]
+}
