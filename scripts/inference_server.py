@@ -20,8 +20,6 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
-sys.path.insert(0, '/Users/discordwell/Library/Python/3.9/lib/python/site-packages')
-
 import torch
 import torchaudio
 import numpy as np
@@ -29,8 +27,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# Base paths
-PROJECT_ROOT = Path("/Users/discordwell/TuvaLLM")
+# Base paths - computed relative to this script's location
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 MODELS_DIR = PROJECT_ROOT / "models"
 
 
@@ -439,14 +437,14 @@ async def reload_models(
     """Reload models from specified paths."""
     results = {}
 
-    if mms_path or mms_path is None:
+    if mms_path is not None:
         try:
             models.load_mms(mms_path)
             results["mms"] = "loaded"
         except Exception as e:
             results["mms"] = f"error: {e}"
 
-    if whisper_path or whisper_path is None:
+    if whisper_path is not None:
         try:
             success = models.load_whisper(whisper_path)
             results["whisper"] = "loaded" if success else "skipped"

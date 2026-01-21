@@ -1,0 +1,19 @@
+{
+  "title": "Universal Declaration of Human Rights - Article 1",
+  "language": "Tuvaluan",
+  "iso_code": "tvl",
+  "speaker": "Tauina Lesaa",
+  "source": "Omniglot",
+  "source_url": "https://www.omniglot.com/soundfiles/udhr/udhr_tuvaluan.mp3",
+  "orthography": "system4",
+  "description": "UDHR Article 1 in Tuvaluan (System 4 orthography with macrons)",
+  "notes": [
+    "Audio file must be downloaded separately from source_url",
+    "Save as audio.mp3 in this directory",
+    "This sample serves as a ground truth benchmark for ASR evaluation"
+  ],
+  "reference_text": {
+    "system4": "E fā'nau mai a tino katoa i te saolotoga kae e 'pau telotolo tūlaga fakaaloalogina mo telotolo aiā. Ne tuku atu ki a lātou a te mafaufau mo te loto lagona, tēlā lā, e 'tau o gā'lue fakatasi lātou e pēlā me ne taina.",
+    "system6": "E fa'nau mai a tino katoa i te saolotoga kae e 'pau telotolo tulaga fakaaloalogina mo telotolo aia. Ne tuku atu ki a latou a te mafaufau mo te loto lagona, tela la, e 'tau o ga'lue fakatasi latou e pela me ne taina."
+  }
+}

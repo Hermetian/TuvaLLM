@@ -18,10 +18,8 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
-sys.path.insert(0, '/Users/discordwell/Library/Python/3.9/lib/python/site-packages')
-
-# Base paths
-PROJECT_ROOT = Path("/Users/discordwell/TuvaLLM")
+# Base paths - computed relative to this script's location
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
@@ -124,6 +122,11 @@ class AudioPlayer:
         if self._waveform is not None:
             return
 
+        # Check if audio file exists
+        if not Path(self.audio_path).exists():
+            print(f"Error: Audio file not found at {self.audio_path}")
+            return
+
         try:
             import torchaudio
             self._waveform, self._sample_rate = torchaudio.load(self.audio_path)
@@ -131,6 +134,8 @@ class AudioPlayer:
             if self._waveform.shape[0] > 1:
                 self._waveform = self._waveform.mean(dim=0, keepdim=True)
             self._waveform = self._waveform.squeeze().numpy()
+        except ImportError:
+            print("Error: torchaudio not installed. Run: pip install torchaudio")
         except Exception as e:
             print(f"Error loading audio: {e}")
 
@@ -143,6 +148,10 @@ class AudioPlayer:
             pygame.mixer.init(frequency=22050, size=-16, channels=1)
             self.initialized = True
             return True
+        except ImportError:
+            print("Warning: pygame not installed. Audio playback disabled.")
+            print("Install with: pip install pygame")
+            return False
         except Exception as e:
             print(f"Could not initialize audio playback: {e}")
             return False

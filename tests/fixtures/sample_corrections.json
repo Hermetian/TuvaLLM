@@ -1,0 +1,47 @@
+{
+  "segments": {
+    "0.0-5.0": {
+      "original_mms": "e fanau mai a tino katoa",
+      "corrected_text": "E fā'nau mai a tino katoa",
+      "start": 0.0,
+      "end": 5.0,
+      "quality": 4
+    },
+    "5.0-10.0": {
+      "original_mms": "i te saolotoga",
+      "corrected_text": "i te saolotoga kae",
+      "start": 5.0,
+      "end": 10.0,
+      "quality": 5
+    },
+    "10.0-15.0": {
+      "original_mms": "pau telotolo tulaga",
+      "corrected_text": "e 'pau telotolo tūlaga",
+      "start": 10.0,
+      "end": 15.0,
+      "quality": 3
+    }
+  },
+  "vocabulary": {
+    "fā'nau": {
+      "word": "fā'nau",
+      "meaning": "born",
+      "pos": "verb"
+    },
+    "tūlaga": {
+      "word": "tūlaga",
+      "meaning": "status/position",
+      "pos": "noun"
+    },
+    "saolotoga": {
+      "word": "saolotoga",
+      "meaning": "freedom",
+      "pos": "noun"
+    }
+  },
+  "metadata": {
+    "created": "2024-01-01T00:00:00",
+    "last_modified": "2024-01-01T00:00:00",
+    "audio_file": "test_audio.mp3"
+  }
+}

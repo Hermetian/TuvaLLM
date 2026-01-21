@@ -19,14 +19,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from collections import Counter
 
-sys.path.insert(0, '/Users/discordwell/Library/Python/3.9/lib/python/site-packages')
-
 import torch
 import torchaudio
 import numpy as np
 
-# Base paths
-PROJECT_ROOT = Path("/Users/discordwell/TuvaLLM")
+# Base paths - computed relative to this script's location
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
 PROCESSED_DIR = DATA_DIR / "processed"
 MODELS_DIR = PROJECT_ROOT / "models"
@@ -112,6 +110,11 @@ class MMSEvaluator:
 
     def transcribe(self, audio_path: str) -> str:
         """Transcribe a single audio file."""
+        # Check if file exists
+        if not Path(audio_path).exists():
+            print(f"Warning: Audio file not found: {audio_path}")
+            return ""
+
         # Load audio
         waveform, sr = torchaudio.load(audio_path)
 
@@ -198,17 +201,20 @@ class WhisperEvaluator:
 
         self.use_baseline = use_baseline
 
-        if use_baseline or model_path is None:
-            print("Loading Whisper baseline...")
-            self.model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
-            self.processor = WhisperProcessor.from_pretrained("openai/whisper-base")
-        else:
-            print(f"Loading fine-tuned Whisper from {model_path}...")
-            from peft import PeftModel
+        try:
+            if use_baseline or model_path is None:
+                print("Loading Whisper baseline...")
+                self.model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
+                self.processor = WhisperProcessor.from_pretrained("openai/whisper-base")
+            else:
+                print(f"Loading fine-tuned Whisper from {model_path}...")
+                from peft import PeftModel
 
-            base_model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
-            self.model = PeftModel.from_pretrained(base_model, model_path)
-            self.processor = WhisperProcessor.from_pretrained(model_path)
+                base_model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
+                self.model = PeftModel.from_pretrained(base_model, model_path)
+                self.processor = WhisperProcessor.from_pretrained(model_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Whisper model: {e}")
 
         self.model.eval()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -222,6 +228,10 @@ class WhisperEvaluator:
 
     def transcribe(self, audio_path: str) -> str:
         """Transcribe a single audio file."""
+        if not Path(audio_path).exists():
+            print(f"Warning: Audio file not found: {audio_path}")
+            return ""
+
         waveform, sr = torchaudio.load(audio_path)
 
         if sr != 16000:

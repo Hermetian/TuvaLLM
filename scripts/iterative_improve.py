@@ -20,14 +20,12 @@ import shutil
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
-sys.path.insert(0, '/Users/discordwell/Library/Python/3.9/lib/python/site-packages')
-
 import torch
 import torchaudio
 import numpy as np
 
-# Base paths
-PROJECT_ROOT = Path("/Users/discordwell/TuvaLLM")
+# Base paths - computed relative to this script's location
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"

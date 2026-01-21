@@ -20,13 +20,14 @@ import random
 from typing import Dict, List, Tuple, Any
 from collections import Counter
 
-sys.path.insert(0, '/Users/discordwell/Library/Python/3.9/lib/python/site-packages')
-
 import soundfile as sf
 import numpy as np
 
-# Base paths
-PROJECT_ROOT = Path("/Users/discordwell/TuvaLLM")
+# Import orthography module
+from orthography import normalize_text as ortho_normalize, build_ctc_vocabulary, detect_system
+
+# Base paths - computed relative to this script's location
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
@@ -82,51 +83,32 @@ def extract_segment(waveform: np.ndarray, sample_rate: int,
     return waveform[start_sample:end_sample]
 
 
-def normalize_text(text: str) -> str:
-    """Normalize transcript text for training."""
-    # Convert to lowercase
-    text = text.lower()
+def normalize_text(text: str, orthography: str = "system4") -> str:
+    """
+    Normalize transcript text for training.
 
-    # Keep Polynesian characters including macrons
-    # Valid chars: a-z, āēīōū, space, apostrophe
-    valid_chars = set("abcdefghijklmnopqrstuvwxyz āēīōū'")
+    Args:
+        text: Raw transcript text
+        orthography: Target orthographic system ("system4" or "system6")
 
-    # Replace common variants
-    text = text.replace("'", "'")  # Normalize apostrophes
-    text = text.replace("'", "'")
-    text = text.replace("`", "'")
-
-    # Filter to valid characters
-    text = "".join(c if c in valid_chars else " " for c in text)
-
-    # Collapse multiple spaces
-    text = " ".join(text.split())
-
-    return text.strip()
+    Returns:
+        Normalized text in target orthographic system
+    """
+    return ortho_normalize(text, target_system=orthography)
 
 
-def build_vocabulary(texts: List[str]) -> Dict[str, int]:
-    """Build character vocabulary for CTC training."""
-    # Count all characters
-    char_counts = Counter()
-    for text in texts:
-        char_counts.update(text)
+def build_vocabulary(texts: List[str], orthography: str = "system4") -> Dict[str, int]:
+    """
+    Build character vocabulary for CTC training.
 
-    # Build vocabulary with special tokens
-    vocab = {
-        "<pad>": 0,
-        "<s>": 1,
-        "</s>": 2,
-        "<unk>": 3,
-        "|": 4,  # Word boundary (CTC convention)
-    }
+    Args:
+        texts: List of normalized transcript texts
+        orthography: Target orthographic system ("system4" or "system6")
 
-    # Add characters sorted by frequency
-    for char, _ in char_counts.most_common():
-        if char not in vocab:
-            vocab[char] = len(vocab)
-
-    return vocab
+    Returns:
+        Character to index mapping with special tokens
+    """
+    return build_ctc_vocabulary(texts, system=orthography)
 
 
 def prepare_segments(
@@ -135,7 +117,8 @@ def prepare_segments(
     min_quality: int = 3,
     min_duration: float = 1.0,
     max_duration: float = 30.0,
-    use_uncorrected: bool = False
+    use_uncorrected: bool = False,
+    orthography: str = "system4"
 ) -> List[Dict[str, Any]]:
     """
     Prepare training segments from corrections.
@@ -171,8 +154,8 @@ def prepare_segments(
         if duration < min_duration or duration > max_duration:
             continue
 
-        # Normalize text
-        normalized = normalize_text(text)
+        # Normalize text with target orthography
+        normalized = normalize_text(text, orthography=orthography)
         if not normalized:
             continue
 
@@ -183,7 +166,8 @@ def prepare_segments(
             "text": normalized,
             "original_text": text,
             "quality": quality,
-            "source": "corrected"
+            "source": "corrected",
+            "orthography": orthography
         })
 
     # Optionally add uncorrected MMS segments
@@ -207,7 +191,7 @@ def prepare_segments(
             if duration < min_duration or duration > max_duration:
                 continue
 
-            normalized = normalize_text(text)
+            normalized = normalize_text(text, orthography=orthography)
             if not normalized:
                 continue
 
@@ -218,7 +202,8 @@ def prepare_segments(
                 "text": normalized,
                 "original_text": text,
                 "quality": 2,  # Default quality for uncorrected
-                "source": "mms_uncorrected"
+                "source": "mms_uncorrected",
+                "orthography": orthography
             })
 
     return segments
@@ -304,6 +289,9 @@ def main():
                        help="Audio file to process")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for splitting")
+    parser.add_argument("--orthography", type=str, default="system4",
+                       choices=["system4", "system6"],
+                       help="Target orthographic system (default: system4 with macrons)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -344,12 +332,13 @@ def main():
     print(f"Loaded {len(corrections.get('segments', {}))} corrected segments")
 
     # Prepare segments
-    print(f"\nPreparing segments (min_quality={args.min_quality})...")
+    print(f"\nPreparing segments (min_quality={args.min_quality}, orthography={args.orthography})...")
     segments = prepare_segments(
         corrections,
         mms_transcript,
         min_quality=args.min_quality,
-        use_uncorrected=args.use_uncorrected
+        use_uncorrected=args.use_uncorrected,
+        orthography=args.orthography
     )
     print(f"Found {len(segments)} usable segments")
 
@@ -359,8 +348,17 @@ def main():
 
     # Load audio
     audio_path = RAW_DIR / args.audio
+    if not audio_path.exists():
+        print(f"Error: Audio file not found at {audio_path}")
+        print("Please place your audio file in the data/raw/ directory.")
+        return
+
     print(f"\nLoading audio: {audio_path}")
-    waveform, sample_rate = load_audio(str(audio_path))
+    try:
+        waveform, sample_rate = load_audio(str(audio_path))
+    except Exception as e:
+        print(f"Error loading audio: {e}")
+        return
     print(f"Audio: {len(waveform)/sample_rate:.1f}s at {sample_rate}Hz")
 
     # Split data
@@ -380,17 +378,39 @@ def main():
 
     print(f"Saved audio segments to {SEGMENTS_DIR}")
 
-    # Build vocabulary
-    print("\nBuilding vocabulary...")
+    # Build vocabulary for target orthographic system
+    print(f"\nBuilding vocabulary for {args.orthography}...")
     all_texts = [s["text"] for s in train + val + test]
-    vocab = build_vocabulary(all_texts)
+    vocab = build_vocabulary(all_texts, orthography=args.orthography)
     print(f"Vocabulary size: {len(vocab)} characters")
 
-    # Save vocabulary
+    # Save vocabulary with metadata
+    vocab_data = {
+        "vocabulary": vocab,
+        "orthography": args.orthography,
+        "size": len(vocab)
+    }
     vocab_file = PROCESSED_DIR / "vocab.json"
     with open(vocab_file, "w", encoding="utf-8") as f:
-        json.dump(vocab, f, ensure_ascii=False, indent=2)
+        json.dump(vocab_data, f, ensure_ascii=False, indent=2)
     print(f"Saved vocabulary to {vocab_file}")
+
+    # Also save metadata about the dataset
+    metadata = {
+        "orthography": args.orthography,
+        "min_quality": args.min_quality,
+        "use_uncorrected": args.use_uncorrected,
+        "audio_file": args.audio,
+        "seed": args.seed,
+        "train_samples": len(train),
+        "val_samples": len(val),
+        "test_samples": len(test),
+        "vocab_size": len(vocab)
+    }
+    metadata_file = PROCESSED_DIR / "dataset_metadata.json"
+    with open(metadata_file, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"Saved metadata to {metadata_file}")
 
     # Save HuggingFace format
     print("\nSaving HuggingFace datasets format...")
@@ -409,6 +429,7 @@ def main():
     print(f"\nTotal data: {total_duration:.1f}s ({total_duration/60:.1f} min)")
     print(f"Training data: {train_duration:.1f}s ({train_duration/60:.1f} min)")
     print(f"Vocabulary: {len(vocab)} characters")
+    print(f"Orthography: {args.orthography}")
 
     print(f"\nOutput files:")
     print(f"  {PROCESSED_DIR / 'train.json'}")
