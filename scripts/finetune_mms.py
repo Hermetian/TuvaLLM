@@ -44,23 +44,27 @@ class TrainingConfig:
     target_language: str = "tvl"  # Tuvaluan (custom)
 
     # Training (based on HuggingFace MMS adapter best practices)
-    num_epochs: int = 4
+    num_epochs: int = 15
     batch_size: int = 2  # Smaller batch for MPS memory
     gradient_accumulation_steps: int = 8  # Effective batch = 16
-    learning_rate: float = 1e-3  # Higher LR for adapter training (HF recommended)
-    lm_head_lr: float = 1e-3  # Same LR for lm_head
+    learning_rate: float = 3e-4  # Standard LR for fine-tuning
+    lm_head_lr: float = 1e-3  # Higher LR for lm_head (init from scratch)
     warmup_ratio: float = 0.1
     weight_decay: float = 0.005
     lm_head_weight_decay: float = 0.0
     max_grad_norm: float = 1.0
     freeze_lm_head: bool = False
     # Two-phase: Train lm_head FIRST (adapters frozen), then unfreeze adapters
-    warmup_epochs_lm_head_only: int = 1
+    warmup_epochs_lm_head_only: int = 2
 
     # Memory optimization
     fp16: bool = True
     gradient_checkpointing: bool = False  # Disabled - can cause issues on MPS
-    max_audio_length: float = 10.0  # seconds (shorter for stability)
+    max_audio_length: float = 30.0  # seconds - increased to avoid audio/text mismatch
+    # How to handle samples longer than max_audio_length:
+    # "truncate_both" = truncate audio AND text proportionally (default)
+    # "skip" = skip samples longer than max_audio_length
+    long_audio_strategy: str = "truncate_both"
 
     # Output
     output_dir: str = str(MODELS_DIR / "mms-tuvaluan")
@@ -70,8 +74,8 @@ class TrainingConfig:
     max_steps: int = -1  # Set >0 to cap total optimizer steps (debugging)
 
     # Data
-    train_file: str = str(PROCESSED_DIR / "train.json")
-    val_file: str = str(PROCESSED_DIR / "validation.json")
+    train_file: str = str(PROCESSED_DIR / "dataset" / "train.jsonl")
+    val_file: str = str(PROCESSED_DIR / "dataset" / "valid.jsonl")
     vocab_file: str = str(PROCESSED_DIR / "vocab.json")
 
 
@@ -83,20 +87,72 @@ class TuvaluanASRDataset(Dataset):
         data_file: str,
         processor,
         max_audio_length: float = 30.0,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        long_audio_strategy: str = "truncate_both"
     ):
         self.processor = processor
         self.max_audio_length = max_audio_length
         self.sample_rate = sample_rate
+        self.long_audio_strategy = long_audio_strategy
 
-        # Load data
+        # Load data (JSONL format)
+        raw_data = []
         with open(data_file, "r", encoding="utf-8") as f:
-            self.data = json.load(f)
+            for line in f:
+                if line.strip():
+                    raw_data.append(json.loads(line))
+        
+        # Filter samples if using "skip" strategy
+        if long_audio_strategy == "skip":
+            self.data = []
+            skipped = 0
+            for item in raw_data:
+                duration = item.get("duration", 0)
+                if duration <= max_audio_length:
+                    self.data.append(item)
+                else:
+                    skipped += 1
+            if skipped > 0:
+                print(f"Skipped {skipped} samples longer than {max_audio_length}s")
+        else:
+            self.data = raw_data
+        
+        # Load vocab for normalization
+        with open(PROCESSED_DIR / "vocab.json", "r", encoding="utf-8") as f:
+            self.vocab = json.load(f)
+            # Create whitelist set (space represented as |)
+            self.allowed_chars = set(self.vocab.keys())
+            if "|" in self.allowed_chars:
+                self.allowed_chars.add(" ") # mapping space to | later
+            # Remove special tokens from allowed chars for text filtering
+            self.allowed_chars = {c for c in self.allowed_chars if c not in ["<s>", "</s>", "<pad>", "<unk>"]}
 
         print(f"Loaded {len(self.data)} samples from {data_file}")
 
     def __len__(self):
         return len(self.data)
+
+    def normalize_text(self, text):
+        """Strict whitelist normalization using vocabulary."""
+        text = text.lower()
+        
+        # Normalize curly quotes/apostrophes to straight apostrophe (glottal stop)
+        text = text.replace("'", "'").replace("'", "'").replace("ʻ", "'").replace("`", "'")
+        
+        # Filter chars
+        clean_text = []
+        for char in text:
+            if char in self.allowed_chars:
+                clean_text.append(char)
+            elif char == " ":
+                clean_text.append(" ")
+        
+        text = "".join(clean_text)
+        
+        # Collapse spaces
+        import re
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
 
     def __getitem__(self, idx):
         item = self.data[idx]
@@ -116,13 +172,35 @@ class TuvaluanASRDataset(Dataset):
         if len(waveform.shape) > 1 and waveform.shape[1] == 2:
             waveform = waveform.mean(axis=1)
 
-        # Truncate if too long
-        max_samples = int(self.max_audio_length * self.sample_rate)
-        if len(waveform) > max_samples:
-            waveform = waveform[:max_samples]
+        # Get text and normalize
+        text = item.get("text", item.get("sentence", ""))
+        text = self.normalize_text(text)
 
-        # Get text
-        text = item["sentence"]
+        # Handle audio longer than max_audio_length
+        max_samples = int(self.max_audio_length * self.sample_rate)
+        original_length = len(waveform)
+        
+        if original_length > max_samples:
+            if self.long_audio_strategy == "truncate_both":
+                # CRITICAL FIX: Truncate BOTH audio AND text proportionally
+                # This ensures CTC can still align the truncated audio to truncated text
+                truncation_ratio = max_samples / original_length
+                waveform = waveform[:max_samples]
+                
+                # Truncate text proportionally (by character count)
+                # Add small buffer to avoid cutting mid-word when possible
+                target_text_len = int(len(text) * truncation_ratio)
+                if target_text_len < len(text):
+                    # Try to cut at a word boundary
+                    truncated = text[:target_text_len]
+                    last_space = truncated.rfind(' ')
+                    if last_space > target_text_len * 0.7:  # Only if we don't lose too much
+                        text = truncated[:last_space].strip()
+                    else:
+                        text = truncated.strip()
+            else:
+                # Just truncate audio (old behavior - causes mismatch)
+                waveform = waveform[:max_samples]
 
         return {
             "input_values": waveform,  # Key required by Trainer's LengthGroupedSampler
@@ -143,6 +221,9 @@ def collate_fn(batch, processor, tuvaluan_vocab):
     audio_arrays = [item["input_values"] for item in batch]
     texts = [item["text"] for item in batch]
 
+    # Track actual audio lengths BEFORE padding (critical for CTC loss)
+    audio_lengths = [len(arr) for arr in audio_arrays]
+
     # Check for NaN/Inf in input audio
     for i, arr in enumerate(audio_arrays):
         if np.isnan(arr).any() or np.isinf(arr).any():
@@ -157,6 +238,9 @@ def collate_fn(batch, processor, tuvaluan_vocab):
         padding=True,
         return_attention_mask=False
     )
+
+    # Store original audio lengths for CTC input_lengths calculation
+    inputs["audio_lengths"] = torch.tensor(audio_lengths, dtype=torch.long)
 
     # Ensure float32 dtype
     inputs["input_values"] = inputs["input_values"].float()
@@ -228,8 +312,8 @@ def create_tuvaluan_vocabulary(vocab_file: str) -> Dict[str, int]:
                 return data["vocabulary"]
             return data
 
-    # Default Tuvaluan character set (includes macrons for long vowels)
-    chars = list("abcdefghijklmnopqrstuvwxyz āēīōū'")
+    # Default Tuvaluan character set (includes macrons for long vowels and apostrophe for glottal stop)
+    chars = list("abcdefghijklmnopqrstuvwxyz'āēīōū")
     vocab = {
         "<pad>": 0,
         "<s>": 1,
@@ -295,6 +379,7 @@ def setup_model_and_processor(config: TrainingConfig):
 
     # Load Samoan adapter as starting point for acoustic features
     model.load_adapter(config.source_language)
+    model.config.add_adapter = True  # CRITICAL: ensure adapters are active in saved model
     print(f"Loaded Samoan adapter as base")
 
     # CRITICAL FIX: load_adapter() overwrites lm_head with Samoan vocab
@@ -309,9 +394,10 @@ def setup_model_and_processor(config: TrainingConfig):
     nn.init.xavier_uniform_(model.lm_head.weight, gain=1.0)
     model.lm_head.bias.data.zero_()
 
-    # CRITICAL: Set negative blank bias to prevent CTC collapse
+    # Set moderate negative blank bias to prevent CTC collapse
     # Blank token (index 0) should be discouraged early in training
-    model.lm_head.bias.data[0] = -5.0
+    # -2.0 is more moderate than -5.0 to avoid over-penalizing blank
+    model.lm_head.bias.data[0] = -2.0
 
     # Update config to match new vocab size
     model.config.vocab_size = len(vocab)
@@ -416,6 +502,7 @@ class CTCTrainer(Trainer):
         import torch.nn.functional as F
 
         labels = inputs.pop("labels", None)
+        audio_lengths = inputs.pop("audio_lengths", None)
         outputs = model(**inputs)
 
         if labels is not None:
@@ -438,10 +525,20 @@ class CTCTrainer(Trainer):
                 loss = torch.tensor(self._last_valid_loss, device=logits.device, requires_grad=True)
                 return (loss, outputs) if return_outputs else loss
 
-            # Get input lengths (all same length since no attention mask)
-            input_lengths = torch.full(
-                (logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device
-            )
+            # CRITICAL FIX: Compute actual input lengths from audio lengths
+            # The feature extractor downsamples audio; use model's method to get output lengths
+            if audio_lengths is not None:
+                # Move to same device as logits
+                audio_lengths = audio_lengths.to(logits.device)
+                # Use the model's built-in method to compute feature extractor output lengths
+                input_lengths = model._get_feat_extract_output_lengths(audio_lengths)
+                # Clamp to max sequence length (in case of any mismatch)
+                input_lengths = input_lengths.clamp(max=logits.size(1))
+            else:
+                # Fallback: assume all sequences are full length (old behavior)
+                input_lengths = torch.full(
+                    (logits.size(0),), logits.size(1), dtype=torch.long, device=logits.device
+                )
 
             # Get target lengths (count non -100 values)
             target_lengths = (labels != -100).sum(dim=1)
@@ -523,16 +620,19 @@ def train(config: TrainingConfig):
 
     # Create datasets
     print("\nLoading datasets...")
+    print(f"Audio length handling: max={config.max_audio_length}s, strategy={config.long_audio_strategy}")
     train_dataset = TuvaluanASRDataset(
         config.train_file,
         processor,
-        max_audio_length=config.max_audio_length
+        max_audio_length=config.max_audio_length,
+        long_audio_strategy=config.long_audio_strategy
     )
 
     val_dataset = TuvaluanASRDataset(
         config.val_file,
         processor,
-        max_audio_length=config.max_audio_length
+        max_audio_length=config.max_audio_length,
+        long_audio_strategy=config.long_audio_strategy
     )
 
     # Training arguments
@@ -634,7 +734,7 @@ def train(config: TrainingConfig):
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        tokenizer=processor,
+        processing_class=processor,
         data_collator=partial(collate_fn, processor=processor, tuvaluan_vocab=vocab),
         compute_metrics=partial(compute_metrics, processor=processor),
         optimizers=(optimizer, scheduler),  # Pass custom optimizer
@@ -675,9 +775,9 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Fine-tune MMS for Tuvaluan")
-    parser.add_argument("--epochs", type=int, default=4, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=15, help="Number of epochs")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for adapter layers")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate for adapter layers")
     parser.add_argument("--lm-head-lr", type=float, default=1e-3,
                        help="Learning rate for lm_head")
     parser.add_argument("--output-dir", type=str, default=str(MODELS_DIR / "mms-tuvaluan"),
@@ -689,10 +789,17 @@ def main():
                        help="Freeze lm_head and only train adapter layers")
     parser.add_argument("--max-grad-norm", type=float, default=1.0,
                        help="Maximum gradient norm for clipping")
-    parser.add_argument("--warmup-epochs", type=int, default=1,
+    parser.add_argument("--warmup-epochs", type=int, default=2,
                        help="Epochs to train lm_head only before unfreezing adapters")
     parser.add_argument("--max-steps", type=int, default=-1,
                        help="Cap total optimizer steps (debugging; default: no cap)")
+    parser.add_argument("--max-audio-length", type=float, default=30.0,
+                       help="Maximum audio length in seconds (default: 30)")
+    parser.add_argument("--long-audio-strategy", type=str, default="truncate_both",
+                       choices=["truncate_both", "skip"],
+                       help="How to handle samples longer than max-audio-length: "
+                            "truncate_both (truncate audio AND text proportionally) or "
+                            "skip (skip long samples)")
     args = parser.parse_args()
 
     config = TrainingConfig(
@@ -706,7 +813,9 @@ def main():
         source_language=args.source_lang,
         freeze_lm_head=args.freeze_lm_head,
         warmup_epochs_lm_head_only=args.warmup_epochs,
-        max_steps=args.max_steps
+        max_steps=args.max_steps,
+        max_audio_length=args.max_audio_length,
+        long_audio_strategy=args.long_audio_strategy
     )
 
     # Check data exists
