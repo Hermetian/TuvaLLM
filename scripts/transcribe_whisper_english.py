@@ -28,7 +28,7 @@ OUTPUT_DIR = PROCESSED_DIR / "whisper_english_transcripts"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def transcribe_audio(model, audio_path: Path, chunk_size: float = 10.0):
+def transcribe_audio(model, audio_path: Path, chunk_size: float = 10.0, fp16: bool = True):
     """
     Transcribe audio with Whisper English, returning MMS-compatible format.
 
@@ -36,6 +36,7 @@ def transcribe_audio(model, audio_path: Path, chunk_size: float = 10.0):
         model: Loaded Whisper model
         audio_path: Path to audio file
         chunk_size: Target chunk duration in seconds for output format
+        fp16: Use fp16 inference (set False for MPS to avoid NaN issues)
 
     Returns:
         List of dicts with 'text', 'start', 'end', 'source' keys
@@ -45,6 +46,7 @@ def transcribe_audio(model, audio_path: Path, chunk_size: float = 10.0):
         language="en",
         verbose=False,
         word_timestamps=True,  # Get word-level timestamps if available
+        fp16=fp16,  # Disable fp16 on MPS to avoid NaN errors
     )
 
     # Convert Whisper segments to MMS-compatible format
@@ -115,6 +117,8 @@ def main():
     parser.add_argument("--audio-dir", type=Path, default=AUDIO_DIR, help="Input audio directory")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR, help="Output directory")
     parser.add_argument("--force", action="store_true", help="Overwrite existing transcripts")
+    parser.add_argument("--fp16", action="store_true", default=None, help="Force fp16 inference")
+    parser.add_argument("--no-fp16", dest="fp16", action="store_false", help="Disable fp16 (needed for MPS)")
     args = parser.parse_args()
 
     # Determine device
@@ -127,11 +131,18 @@ def main():
     else:
         device = "cpu"
 
+    # Determine fp16 setting - default OFF for MPS (causes NaN errors with large models)
+    if args.fp16 is None:
+        use_fp16 = device != "mps"  # Disable fp16 on MPS by default
+    else:
+        use_fp16 = args.fp16
+
     print("=" * 60)
     print("Whisper English Transcription")
     print("=" * 60)
     print(f"Model: {args.model}")
     print(f"Device: {device}")
+    print(f"FP16: {use_fp16}")
     print(f"Audio dir: {args.audio_dir}")
     print(f"Output dir: {args.output_dir}")
 
@@ -162,7 +173,7 @@ def main():
             continue
 
         try:
-            chunks = transcribe_audio(model, audio_path)
+            chunks = transcribe_audio(model, audio_path, fp16=use_fp16)
 
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(chunks, f, indent=2, ensure_ascii=False)
