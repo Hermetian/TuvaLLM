@@ -172,30 +172,48 @@ def longest_increasing_subsequence_with_indices(
     # Sort by audio time
     candidates.sort(key=lambda c: c["audio_time"])
 
-    # Dynamic programming for LIS on (audio_time, word_idx) pairs
+    # O(n log n) LIS algorithm using binary search
     # We need word_idx to be increasing as audio_time increases
     n = len(candidates)
-    dp = [1] * n
+    if n == 0:
+        return []
+
+    # tails[i] = smallest ending word_idx of all increasing subsequences of length i+1
+    # indices[i] = index in candidates of the element at tails[i]
+    # parent[i] = index of previous element in the LIS ending at candidates[i]
+    from bisect import bisect_left
+
+    tails = []
+    indices = []
     parent = [-1] * n
 
-    for i in range(1, n):
-        for j in range(i):
-            # Check if word_idx is increasing (audio_time is already sorted)
-            if candidates[j]["word_idx"] < candidates[i]["word_idx"]:
-                if dp[j] + 1 > dp[i]:
-                    dp[i] = dp[j] + 1
-                    parent[i] = j
+    for i, cand in enumerate(candidates):
+        word_idx = cand["word_idx"]
 
-    # Find the longest sequence
-    max_len = max(dp) if dp else 0
-    max_idx = dp.index(max_len) if dp else -1
+        # Binary search for position in tails
+        pos = bisect_left(tails, word_idx)
 
+        if pos == len(tails):
+            # Extend LIS
+            tails.append(word_idx)
+            indices.append(i)
+        else:
+            # Replace with smaller value
+            tails[pos] = word_idx
+            indices[pos] = i
+
+        # Set parent
+        if pos > 0:
+            parent[i] = indices[pos - 1]
+
+    # Backtrack from the last element
+    max_len = len(tails)
     if max_len < MIN_SEQUENCE_LENGTH:
         return []
 
-    # Backtrack to get the sequence
+    # Find the actual sequence by backtracking
     sequence = []
-    idx = max_idx
+    idx = indices[-1] if indices else -1
     while idx != -1:
         c = candidates[idx]
         sequence.append((c["anchor"], c["word_idx"]))

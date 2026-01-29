@@ -43,7 +43,7 @@ SEGMENTS_DIR = PROCESSED_DIR / "segments_confident"
 SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
-MIN_CONFIDENCE = 0.6  # Minimum sequence confidence for segment generation
+MIN_CONFIDENCE = 0.55  # Minimum sequence confidence for segment generation
 MIN_SEQUENCE_LENGTH = 5  # Minimum anchors in a sequence
 MAX_SEGMENT_DURATION = 15.0  # Maximum segment duration in seconds
 MAX_SEGMENT_WORDS = 30  # Maximum words per segment

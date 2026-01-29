@@ -35,13 +35,43 @@ Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't suppor
 
 ---
 
+### Problem 3: O(n^2) LIS algorithm too slow
+
+**Symptom:** sequence_align.py stuck at 9% after 10+ minutes, CPU at 98%
+
+**Root Cause:** O(n^2) dynamic programming LIS algorithm with thousands of candidates per file
+
+**Solution:** Replaced with O(n log n) binary search algorithm using bisect
+
+**Result:** Completed in <1 second instead of hours
+
+---
+
 ## Pipeline Status
 
 | Step | Script | Status | Notes |
 |------|--------|--------|-------|
-| 1 | transcribe_whisper_english.py | FIXING | MPS NaN issue |
-| 2 | merge_anchor_sources.py | PENDING | |
-| 3 | sequence_align.py | PENDING | |
-| 4 | anchor_align.py | PENDING | |
-| 5 | verify_alignment.py | PENDING | |
-| 6 | prepare_dataset.py | PENDING | |
+| 1 | transcribe_whisper_english.py | RUNNING | CPU medium model, still on file 2/19 |
+| 2 | merge_anchor_sources.py | DONE | 13,788 MMS-only anchors |
+| 3 | sequence_align.py | DONE | 19 sequences, avg 627 anchors each |
+| 4 | anchor_align.py | DONE | 1809 segments, 4.44 hours (lowered threshold to 0.55) |
+| 5 | verify_alignment.py | DONE | 10 samples exported for QA |
+| 6 | prepare_dataset.py | DONE | 1225 clips, 2.78 hours (min confidence 0.5) |
+
+## First Run Results (MMS-only)
+
+**Dataset created:** 2.78 hours of aligned audio
+- Train: 1103 clips
+- Val: 61 clips
+- Test: 61 clips
+
+**Quality Notes:**
+- 88.2% of segments have confidence < 0.6 (MMS-only)
+- 43.3% have normal WPS (1.5-3.5)
+- 1284 segments flagged for potential issues
+
+**Next Steps:**
+1. Wait for Whisper English transcription to complete (~hours remaining)
+2. Re-run merge_anchor_sources.py with both MMS + Whisper
+3. Re-run pipeline - expect higher confidence scores with dual-model anchors
+4. Manually verify sample clips before training
