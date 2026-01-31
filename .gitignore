@@ -61,3 +61,38 @@ logs/
 .env
 .env.local
 *.mp3
+
+# Data files (too large for git)
+data/raw/
+data/archive/
+data/processed/
+data/reference/
+data/models/
+data/transcripts/
+*.mp3
+*.mp4
+*.wav
+*.zip
+
+# Evaluation results
+evaluation_results.json
+
+# Temporary scripts in root
+score_alignment.py
+score_batches.py
+
+# Models (all)
+models/
+
+# Cache
+.cache/
+
+# Keep structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Claude session files
+CLAUDE.md
+claudepad.md
+oldpad.md
+
