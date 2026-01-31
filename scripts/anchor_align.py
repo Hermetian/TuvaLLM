@@ -43,7 +43,7 @@ SEGMENTS_DIR = PROCESSED_DIR / "segments_confident"
 SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration
-MIN_CONFIDENCE = 0.55  # Minimum sequence confidence for segment generation
+MIN_CONFIDENCE = 0.45  # Minimum sequence confidence for segment generation
 MIN_SEQUENCE_LENGTH = 5  # Minimum anchors in a sequence
 MAX_SEGMENT_DURATION = 15.0  # Maximum segment duration in seconds
 MAX_SEGMENT_WORDS = 30  # Maximum words per segment
@@ -101,7 +101,8 @@ def create_segments_from_sequence(
         if word_end <= word_start or seg_duration <= 0:
             continue
 
-        seg_words = words[word_start:word_end]
+        # Include anchor_end word (+1 because Python slicing is exclusive)
+        seg_words = words[word_start:word_end + 1]
         if not seg_words:
             continue
 
