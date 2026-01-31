@@ -1,5 +1,38 @@
 # AGENTS.md
 
+## Data Preparation Pipeline
+
+### 1. Preprocess Audio
+Convert all MP3/MP4 files in `data/raw` to 16kHz Mono WAV in `data/processed/audio_16k`.
+```bash
+python scripts/preprocess_audio.py
+```
+
+### 2. Transcribe Audio (MMS-Samoan)
+Run ASR (Samoan adapter) on all audio files to generate timestamped rough transcripts.
+**Time:** ~2-4 hours (depending on GPU/MPS).
+```bash
+# This requires ~16GB RAM for long files
+python scripts/transcribe_with_mms.py
+```
+*Output: `data/processed/mms_transcripts/*.json`*
+
+### 3. Align Transcripts
+Align the Official Transcripts (DOCX) to the MMS Audio Transcripts to generate accurate training segments.
+```bash
+python scripts/align_text_to_transcript.py
+```
+*Output: `data/processed/segments/*.json`*
+
+### 4. Create Dataset
+Slice audio into clips and create HuggingFace-compatible JSONL splits.
+```bash
+python scripts/prepare_dataset.py
+```
+*Output: `data/processed/dataset/{train,valid,test}.jsonl` & `clips/`*
+
+---
+
 ## Notes: PyTorch MPS on macOS 26.x
 
 ### Problem

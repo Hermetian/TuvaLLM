@@ -57,6 +57,9 @@ class TrainingConfig:
     # Two-phase: Train lm_head FIRST (adapters frozen), then unfreeze adapters
     warmup_epochs_lm_head_only: int = 2
 
+    # Device
+    device: str = None  # None = auto-detect, or force "cpu"/"mps"/"cuda"
+
     # Memory optimization
     fp16: bool = True
     gradient_checkpointing: bool = False  # Disabled - can cause issues on MPS
@@ -604,19 +607,26 @@ def train(config: TrainingConfig):
     print("=" * 70)
     print()
 
-    # Check for GPU
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    # Check for GPU (or use forced device)
+    if config.device:
+        device = config.device
+    else:
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Device: {device}")
 
     # Setup model
     model, processor, vocab = setup_model_and_processor(config)
 
-    # Move to device (ensure float32 for MPS)
+    # Move to device (ensure float32 for MPS/CPU)
     if device == "cuda":
         model = model.cuda()
     elif device == "mps":
         model = model.float()  # Ensure float32 before moving to MPS
         model = model.to("mps")
+    elif device == "cpu":
+        model = model.float()  # Ensure float32
+        model = model.to("cpu")
+        print("FORCED CPU MODE: CTC loss will run on CPU (slower but stable)")
 
     # Create datasets
     print("\nLoading datasets...")
@@ -636,6 +646,9 @@ def train(config: TrainingConfig):
     )
 
     # Training arguments
+    # CRITICAL: Force CPU if device is set to cpu (HuggingFace Trainer ignores our device var otherwise)
+    use_cpu = (device == "cpu")
+
     training_args = TrainingArguments(
         output_dir=config.output_dir,
         group_by_length=False,  # Disabled - custom dataset format
@@ -660,6 +673,7 @@ def train(config: TrainingConfig):
         report_to="none",
         dataloader_num_workers=0,  # Disable multiprocessing - MPS issues
         dataloader_pin_memory=False,  # MPS doesn't support pinned memory
+        use_cpu=use_cpu,  # Force CPU when --device cpu is passed
     )
 
     # Create custom optimizer with parameter groups (different LRs for lm_head vs adapters)
@@ -795,6 +809,8 @@ def main():
                        help="Cap total optimizer steps (debugging; default: no cap)")
     parser.add_argument("--max-audio-length", type=float, default=30.0,
                        help="Maximum audio length in seconds (default: 30)")
+    parser.add_argument("--device", type=str, default=None,
+                        help="Force device (cpu/mps/cuda). Default: auto-detect")
     parser.add_argument("--long-audio-strategy", type=str, default="truncate_both",
                        choices=["truncate_both", "skip"],
                        help="How to handle samples longer than max-audio-length: "
@@ -815,7 +831,8 @@ def main():
         warmup_epochs_lm_head_only=args.warmup_epochs,
         max_steps=args.max_steps,
         max_audio_length=args.max_audio_length,
-        long_audio_strategy=args.long_audio_strategy
+        long_audio_strategy=args.long_audio_strategy,
+        device=args.device
     )
 
     # Check data exists
